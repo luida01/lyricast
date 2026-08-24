@@ -390,17 +390,28 @@ def fetch_genius(artist: str, title: str, duration: float | None = None) -> Lyri
         return None
 
 
+def is_mostly_non_latin(text: str) -> bool:
+    """True when alphabetic characters are predominantly non-Latin (Hangul, Kanji...)."""
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return False
+    latin_letters = sum(1 for char in letters if "a" <= char.lower() <= "z")
+    return latin_letters / len(letters) < 0.5
+
+
 def fetch_lyrics(artist: str, title: str, duration: float | None) -> LyricsResult:
-    lrclib_exact = fetch_lrclib(artist, title, duration)
-    if lrclib_exact:
-        return lrclib_exact
+    result = fetch_lrclib(artist, title, duration) or fetch_lrclib_search(artist, title, duration)
+    if result is None:
+        genius = fetch_genius(artist, title, duration)
+        if genius:
+            return genius
+        raise RuntimeError("No lyrics were found on LRCLIB or Genius (including romanized pages).")
 
-    lrclib_search = fetch_lrclib_search(artist, title, duration)
-    if lrclib_search:
-        return lrclib_search
-
-    genius = fetch_genius(artist, title, duration)
-    if genius:
-        return genius
-
-    raise RuntimeError("No lyrics were found on LRCLIB or Genius (including romanized pages).")
+    # LRCLIB often stores native-script lyrics for Asian releases. Native Hangul
+    # or Kanji cannot be sung by non-native speakers, so prefer the Genius
+    # Romanizations page when one exists for the same track.
+    if is_mostly_non_latin(result.plain_lyrics):
+        romanized = fetch_genius(artist, title, duration)
+        if romanized and romanized.provider == "genius-romanized":
+            return romanized
+    return result

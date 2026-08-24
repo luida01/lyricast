@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lyricast_pipeline.lyrics import parse_lrc, plain_text_lines
+from lyricast_pipeline.lyrics import is_mostly_non_latin, parse_lrc, plain_text_lines
 from lyricast_pipeline.alignment import apply_transcript_timings
 from lyricast_pipeline.lyrics import LyricLine, LyricWord
 
@@ -48,6 +48,13 @@ class LyricsParsingTests(unittest.TestCase):
 
         self.assertFalse(has_word_timing)
         self.assertEqual([line.text for line in lines], ["Hello world", "Again"])
+
+    def test_flags_native_korean_script(self) -> None:
+        self.assertTrue(is_mostly_non_latin("달과 지구는 언제부터 이렇게 함께했던 건지"))
+
+    def test_does_not_flag_romanized_or_latin_lyrics(self) -> None:
+        self.assertFalse(is_mostly_non_latin("Nal seuchineun geudaeui yeoteun geu mogsoli"))
+        self.assertFalse(is_mostly_non_latin("너는 나의 지구 네게 난 just a moon and all I see is you"))
 
     def test_applies_word_timestamps_without_estimation(self) -> None:
         lines = [LyricLine("Hello world", [LyricWord("Hello"), LyricWord("world")])]
