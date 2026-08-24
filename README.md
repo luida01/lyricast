@@ -82,6 +82,8 @@ The CLI searches YouTube and shows the top candidates. Select one before downloa
 npm run lyricast -- generate "Rick Astley - Never Gonna Give You Up" --yes
 ```
 
+For tracks from an album, the first YouTube search includes the Spotify album name. For singles or releases without an album, it prioritizes the artist and `Artist - Topic` channels instead. The candidate list is still shown so the source can be confirmed before downloading.
+
 Useful options:
 
 ```text

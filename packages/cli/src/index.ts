@@ -111,6 +111,9 @@ async function directoryExists(directory: string): Promise<boolean> {
 
 function displayTrack(track: SpotifyTrack): void {
   console.log(`Spotify match: ${track.artists.join(", ")} - ${track.title}`);
+  if (track.albumName) {
+    console.log(`Release: ${track.albumName}${track.albumType ? ` (${track.albumType})` : ""}`);
+  }
   console.log(`Duration: ${(track.durationMs / 1000).toFixed(1)}s`);
   console.log(`URL: ${track.spotifyUrl}`);
 }

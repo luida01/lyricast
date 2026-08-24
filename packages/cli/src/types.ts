@@ -10,6 +10,7 @@ export interface SpotifyTrack {
   artists: string[];
   durationMs: number;
   albumName: string;
+  albumType?: string;
   albumImageUrl?: string;
   spotifyUrl: string;
 }

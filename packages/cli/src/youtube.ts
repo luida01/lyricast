@@ -65,6 +65,10 @@ async function runYtDlp(args: string[], inheritOutput = false): Promise<{ stdout
 
 function scoreCandidate(candidate: YoutubeCandidate, track: SpotifyTrack): number {
   const normalizedTitle = normalizeText(candidate.title);
+  const normalizedArtist = normalizeText(track.artists[0] ?? "");
+  const normalizedTrackTitle = normalizeText(track.title);
+  const normalizedAlbum = normalizeText(track.albumName);
+  const normalizedChannel = normalizeText(candidate.channel);
   const searchTerms = [track.title, ...track.artists]
     .flatMap((term) => normalizeText(term).split(" "))
     .filter((term) => term.length > 1);
@@ -88,6 +92,12 @@ function scoreCandidate(candidate: YoutubeCandidate, track: SpotifyTrack): numbe
       score += 8;
     }
   }
+  if (normalizedTrackTitle && normalizedTitle.includes(normalizedTrackTitle)) {
+    score += 20;
+  }
+  if (normalizedAlbum && normalizedAlbum !== normalizedTrackTitle && normalizedTitle.includes(normalizedAlbum)) {
+    score += 18;
+  }
   for (const term of badTerms) {
     if (normalizedTitle.includes(term)) {
       score -= 35;
@@ -99,6 +109,17 @@ function scoreCandidate(candidate: YoutubeCandidate, track: SpotifyTrack): numbe
     }
   }
 
+  if (normalizedArtist && normalizedChannel === normalizedArtist) {
+    score += 45;
+  } else if (normalizedArtist && normalizedChannel.includes(`${normalizedArtist} topic`)) {
+    score += 65;
+  } else if (normalizedArtist && normalizedChannel.includes(normalizedArtist)) {
+    score += 25;
+  }
+  if (normalizedChannel.includes("vevo")) {
+    score += 15;
+  }
+
   if (candidate.durationSeconds !== undefined) {
     const delta = Math.abs(candidate.durationSeconds - track.durationMs / 1000);
     score += Math.max(0, 50 - delta * 3);
@@ -107,8 +128,14 @@ function scoreCandidate(candidate: YoutubeCandidate, track: SpotifyTrack): numbe
   return score;
 }
 
-export async function searchYoutubeCandidates(track: SpotifyTrack, limit = 5): Promise<YoutubeCandidate[]> {
-  const query = `${track.artists[0] ?? ""} ${track.title} official audio`.trim();
+function hasUsableAlbum(track: SpotifyTrack): boolean {
+  const album = normalizeText(track.albumName);
+  const title = normalizeText(track.title);
+  const isAlbumRelease = track.albumType === "album" || track.albumType === "compilation";
+  return Boolean(isAlbumRelease && album && album !== title);
+}
+
+async function searchYoutubeEntries(query: string, limit: number): Promise<YtDlpEntry[]> {
   const result = await runYtDlp([
     "--flat-playlist",
     "--dump-single-json",
@@ -125,7 +152,11 @@ export async function searchYoutubeCandidates(track: SpotifyTrack, limit = 5): P
     throw new Error("yt-dlp returned invalid search data. Check the yt-dlp installation and network connection.");
   }
 
-  return (payload.entries ?? [])
+  return payload.entries ?? [];
+}
+
+function mapYoutubeCandidates(entries: YtDlpEntry[], track: SpotifyTrack): YoutubeCandidate[] {
+  return entries
     .filter((entry): entry is YtDlpEntry & { id: string; title: string } => Boolean(entry.id && entry.title))
     .map((entry) => {
       const durationSeconds = Number.isFinite(entry.duration) ? entry.duration : undefined;
@@ -141,6 +172,25 @@ export async function searchYoutubeCandidates(track: SpotifyTrack, limit = 5): P
       return { ...candidate, score: scoreCandidate(candidate, track) };
     })
     .sort((left, right) => right.score - left.score);
+}
+
+export async function searchYoutubeCandidates(track: SpotifyTrack, limit = 5): Promise<YoutubeCandidate[]> {
+  const artist = track.artists[0] ?? "";
+  const base = `${artist} ${track.title}`.trim();
+  const queries = hasUsableAlbum(track)
+    ? [`${base} ${track.albumName} official audio`, `${base} official audio`]
+    : [`${base} Topic official audio`, `${base} official audio`];
+  let entries: YtDlpEntry[] = [];
+
+  for (const query of queries) {
+    console.log(`YouTube search: ${query}`);
+    entries = await searchYoutubeEntries(query, limit);
+    if (entries.length > 0) {
+      break;
+    }
+  }
+
+  return mapYoutubeCandidates(entries, track);
 }
 
 export async function selectYoutubeCandidate(

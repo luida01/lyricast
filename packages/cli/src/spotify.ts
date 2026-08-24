@@ -15,6 +15,7 @@ interface SpotifySearchItem {
   artists?: Array<{ name?: string }>;
   album?: {
     name?: string;
+    album_type?: string;
     images?: Array<{ url?: string }>;
   };
 }
@@ -82,6 +83,7 @@ function mapTrack(item: SpotifySearchItem): SpotifyTrack | undefined {
     artists,
     durationMs: item.duration_ms,
     albumName: item.album?.name ?? "",
+    ...(item.album?.album_type ? { albumType: item.album.album_type } : {}),
     ...(albumImageUrl ? { albumImageUrl } : {}),
     spotifyUrl: item.external_urls?.spotify ?? `https://open.spotify.com/track/${item.id}`,
   };
