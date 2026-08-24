@@ -86,12 +86,14 @@ Useful options:
 
 ```text
 --output <dir>       Output root directory (default: out)
---artist <name>      Use with --title instead of the Artist - Title format
---title <name>       Use with --artist instead of the Artist - Title format
---language <code>    Hint WhisperX, for example es or en
+--artist <name>      Use with --title instead of a separated query
+--title <name>       Use with --artist instead of a separated query
+--language <code>    Optional WhisperX hint; does not translate lyrics
 --force              Replace an existing generated job
 --yes                Accept the first YouTube candidate
 ```
+
+The `--language` option is optional. If omitted, WhisperX detects the language automatically. It only affects voice transcription and alignment; lyrics remain in their original language and are never translated or filtered by this option.
 
 Each generated song is written to `out/<artist>-<title>/`:
 

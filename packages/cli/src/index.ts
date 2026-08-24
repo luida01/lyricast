@@ -24,7 +24,7 @@ Options:
   --output <dir>       Output root directory (default: out)
   --artist <name>      Artist name when not using a separated query
   --title <name>       Song title when not using a separated query
-  --language <code>    WhisperX language hint, for example es or en
+  --language <code>    Optional WhisperX hint; does not translate lyrics
   --whisper-model <n>  WhisperX model (default: small)
   --yes                Automatically select the highest-ranked YouTube result
   --force              Replace the existing output directory
