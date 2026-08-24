@@ -10,6 +10,7 @@ interface YtDlpEntry {
   title?: string;
   uploader?: string;
   channel?: string;
+  channel_id?: string;
   duration?: number;
   webpage_url?: string;
   thumbnail?: string;
@@ -69,6 +70,7 @@ function scoreCandidate(candidate: YoutubeCandidate, track: SpotifyTrack): numbe
   const normalizedTrackTitle = normalizeText(track.title);
   const normalizedAlbum = normalizeText(track.albumName);
   const normalizedChannel = normalizeText(candidate.channel);
+  const rawTitle = candidate.title.toLowerCase();
   const searchTerms = [track.title, ...track.artists]
     .flatMap((term) => normalizeText(term).split(" "))
     .filter((term) => term.length > 1);
@@ -83,8 +85,11 @@ function scoreCandidate(candidate: YoutubeCandidate, track: SpotifyTrack): numbe
     "nightcore",
     "reaction",
     "tutorial",
+    "color coded",
+    "easy lyrics",
   ];
-  const positiveTerms = ["official", "audio", "music video", "lyrics", "lyric"];
+  const weakNegativeTerms = ["lyrics", "가사", "sub espa", "eng sub", "sub eng"];
+  const positiveTerms = ["official", "audio", "music video"];
   let score = 0;
 
   for (const term of searchTerms) {
@@ -99,8 +104,13 @@ function scoreCandidate(candidate: YoutubeCandidate, track: SpotifyTrack): numbe
     score += 18;
   }
   for (const term of badTerms) {
-    if (normalizedTitle.includes(term)) {
+    if (normalizedTitle.includes(term) || rawTitle.includes(term)) {
       score -= 35;
+    }
+  }
+  for (const term of weakNegativeTerms) {
+    if (rawTitle.includes(term)) {
+      score -= 14;
     }
   }
   for (const term of positiveTerms) {
@@ -142,6 +152,8 @@ async function searchYoutubeEntries(query: string, limit: number): Promise<YtDlp
     "--skip-download",
     "--no-warnings",
     "--quiet",
+    "--js-runtimes",
+    "node",
     `ytsearch${limit}:${query}`,
   ]);
 
@@ -193,6 +205,171 @@ export async function searchYoutubeCandidates(track: SpotifyTrack, limit = 5): P
   return mapYoutubeCandidates(entries, track);
 }
 
+async function fetchFlatTabEntries(url: string, limit: number): Promise<YtDlpEntry[]> {
+  try {
+    const result = await runYtDlp([
+      "--flat-playlist",
+      "--dump-single-json",
+      "--skip-download",
+      "--no-warnings",
+      "--quiet",
+      "--js-runtimes",
+      "node",
+      "--playlist-end",
+      String(limit),
+      url,
+    ]);
+
+    const payload = JSON.parse(result.stdout) as YtDlpSearchResult;
+    return payload.entries ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function resolveArtistChannelId(artist: string): Promise<string | undefined> {
+  if (!artist) {
+    return undefined;
+  }
+
+  const normalizedArtist = normalizeText(artist);
+  let fallbackChannelId: string | undefined;
+
+  for (const query of [`${artist} - Topic`, `${artist} official`] as const) {
+    let entries: YtDlpEntry[] = [];
+    try {
+      entries = await searchYoutubeEntries(query, 5);
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.channel_id) {
+        continue;
+      }
+      const channel = normalizeText(entry.channel || entry.uploader || "");
+      if (!channel.includes(normalizedArtist)) {
+        continue;
+      }
+      if (channel.includes("topic")) {
+        return entry.channel_id;
+      }
+      fallbackChannelId ??= entry.channel_id;
+    }
+  }
+
+  return fallbackChannelId;
+}
+
+function pickBestRelease(entries: YtDlpEntry[], albumName: string): YtDlpEntry | undefined {
+  const wantedAlbum = normalizeText(albumName);
+  if (!wantedAlbum) {
+    return undefined;
+  }
+
+  let best: { entry: YtDlpEntry; score: number } | undefined;
+  for (const entry of entries) {
+    if (!entry.id || !entry.title) {
+      continue;
+    }
+    const title = normalizeText(entry.title);
+    let score = 0;
+    if (title === wantedAlbum) {
+      score = 4;
+    } else if (title.includes(wantedAlbum) || wantedAlbum.includes(title)) {
+      score = 2;
+    }
+    if (score > 0 && (!best || score > best.score)) {
+      best = { entry, score };
+    }
+  }
+  return best?.entry;
+}
+
+function pickBestReleaseTrack(entries: YtDlpEntry[], track: SpotifyTrack): YoutubeCandidate | undefined {
+  const wantedTitle = normalizeText(track.title);
+  const expectedDuration = track.durationMs / 1000;
+  let best: { candidate: YoutubeCandidate; score: number } | undefined;
+
+  for (const entry of entries) {
+    if (!entry.id || !entry.title) {
+      continue;
+    }
+    const title = normalizeText(entry.title);
+    let score = 0;
+    if (title === wantedTitle) {
+      score = 8;
+    } else if (wantedTitle && title.includes(wantedTitle)) {
+      score = 4;
+    }
+    if (score === 0) {
+      continue;
+    }
+
+    const durationSeconds = Number.isFinite(entry.duration) ? entry.duration : undefined;
+    if (durationSeconds !== undefined) {
+      score += Math.max(0, 4 - Math.abs(durationSeconds - expectedDuration));
+    }
+
+    const candidate: YoutubeCandidate = {
+      id: entry.id,
+      title: entry.title,
+      channel: entry.channel || entry.uploader || "Unknown channel",
+      ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+      url: entry.webpage_url || `https://www.youtube.com/watch?v=${entry.id}`,
+      ...(entry.thumbnail ? { thumbnailUrl: entry.thumbnail } : {}),
+      score: 400 + score,
+    };
+    if (!best || score > best.score) {
+      best = { candidate, score };
+    }
+  }
+  return best?.candidate;
+}
+
+async function findReleaseTrackCandidate(track: SpotifyTrack): Promise<YoutubeCandidate | undefined> {
+  const artist = track.artists[0] ?? "";
+  const channelId = await resolveArtistChannelId(artist);
+  if (!channelId) {
+    return undefined;
+  }
+
+  // Artist channels expose their discography under /releases; Topic channels mirror it.
+  const releases = await fetchFlatTabEntries(
+    `https://www.youtube.com/channel/${channelId}/releases`,
+    50,
+  );
+  const release = pickBestRelease(releases, track.albumName);
+  if (!release?.id) {
+    return undefined;
+  }
+
+  const tracks = await fetchFlatTabEntries(`https://www.youtube.com/playlist?list=${release.id}`, 80);
+  const matched = pickBestReleaseTrack(tracks, track);
+  if (!matched) {
+    return undefined;
+  }
+
+  return {
+    ...matched,
+    channel: release.channel || release.uploader || `${artist} - Topic`,
+  };
+}
+
+export async function findYoutubeAudio(track: SpotifyTrack, limit = 5): Promise<YoutubeCandidate[]> {
+  // Preferred path: the artist's Releases tab -> matching release -> matching track.
+  try {
+    const releaseCandidate = await findReleaseTrackCandidate(track);
+    if (releaseCandidate) {
+      return [releaseCandidate];
+    }
+  } catch {
+    // Fall through to keyword searches below.
+  }
+
+  return await searchYoutubeCandidates(track, limit);
+}
+
 export async function selectYoutubeCandidate(
   candidates: YoutubeCandidate[],
   autoConfirm: boolean,
@@ -218,7 +395,7 @@ export async function selectYoutubeCandidate(
   }
 
   while (true) {
-    const answer = await ask("Select a candidate (1-5, or q to quit): ");
+    const answer = await ask(`Select a candidate (1-${candidates.length}, or q to quit): `);
     if (answer.toLowerCase() === "q") {
       throw new Error("Generation cancelled.");
     }
@@ -244,6 +421,8 @@ export async function downloadAudio(candidate: YoutubeCandidate, outputDirectory
       "wav",
       "--audio-quality",
       "0",
+      "--js-runtimes",
+      "node",
       "--output",
       template,
       candidate.url,

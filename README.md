@@ -82,7 +82,9 @@ The CLI searches YouTube and shows the top candidates. Select one before downloa
 npm run lyricast -- generate "Rick Astley - Never Gonna Give You Up" --yes
 ```
 
-For tracks from an album, the first YouTube search includes the Spotify album name. For singles or releases without an album, it prioritizes the artist and `Artist - Topic` channels instead. The candidate list is still shown so the source can be confirmed before downloading.
+Song lookup prefers the artist's YouTube `Releases` tab: it resolves the artist channel, finds the release matching the Spotify album name, and picks the track matching the song title and duration. If that path fails (for example, singles outside album releases), it falls back to keyword searches that prioritize official channels, `Artist - Topic`, and VEVO, while demoting fan-made lyric videos. The candidate list is still shown so the source can be confirmed before downloading.
+
+Lyrics are fetched from LRCLIB first, then from Genius. For Asian releases missing from LRCLIB, the Genius fallback works without any token via the public search endpoint and prefers romanized pages (`Genius Romanizations`) when they match. Set `GENIUS_ACCESS_TOKEN` in `.env` only if you prefer the official API.
 
 Useful options:
 

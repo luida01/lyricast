@@ -2,7 +2,7 @@ import "dotenv/config";
 import { access, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { downloadCover, scoreSpotifyTrack, searchSpotifyTracks } from "./spotify.js";
-import { downloadAudio, searchYoutubeCandidates, selectYoutubeCandidate } from "./youtube.js";
+import { downloadAudio, findYoutubeAudio, selectYoutubeCandidate } from "./youtube.js";
 import { getSongQueryVariants, parseSongQuery, jobSlug } from "./song.js";
 import { ensureDirectory, writeJson } from "./util.js";
 import type { GenerateOptions, SpotifyTrack } from "./types.js";
@@ -145,7 +145,7 @@ async function generate(options: GenerateOptions): Promise<void> {
   }
   displayTrack(track);
 
-  const candidates = await searchYoutubeCandidates(track);
+  const candidates = await findYoutubeAudio(track);
   const selectedCandidate = await selectYoutubeCandidate(candidates, options.autoConfirm);
   console.log(`Selected: ${selectedCandidate.title}`);
 

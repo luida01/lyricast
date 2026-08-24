@@ -133,10 +133,31 @@ def plain_text_lines(content: str) -> list[LyricLine]:
     return lines
 
 
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
+
+
 def _request_json(url: str, headers: dict[str, str] | None = None) -> object:
-    request = Request(url, headers={"User-Agent": "Lyricast/0.1", **(headers or {})})
+    request = Request(url, headers={"User-Agent": BROWSER_UA, **(headers or {})})
     with urlopen(request, timeout=20) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _lyrics_result_from_record(record: dict, duration: float | None) -> LyricsResult | None:
+    plain_lyrics = record.get("plainLyrics")
+    synced_lyrics = record.get("syncedLyrics")
+    if not isinstance(plain_lyrics, str) and not isinstance(synced_lyrics, str):
+        return None
+    synced_lyrics = synced_lyrics if isinstance(synced_lyrics, str) else ""
+    plain_lyrics = plain_lyrics if isinstance(plain_lyrics, str) else synced_lyrics
+    lines, has_word_timing = parse_lrc(synced_lyrics, duration) if synced_lyrics else (plain_text_lines(plain_lyrics), False)
+    if not lines:
+        lines = plain_text_lines(plain_lyrics)
+    if not lines:
+        return None
+    return LyricsResult("lrclib", plain_lyrics, lines, has_word_timing)
 
 
 def fetch_lrclib(artist: str, title: str, duration: float | None) -> LyricsResult | None:
@@ -151,16 +172,38 @@ def fetch_lrclib(artist: str, title: str, duration: float | None) -> LyricsResul
 
     if not isinstance(payload, dict):
         return None
-    plain_lyrics = payload.get("plainLyrics")
-    synced_lyrics = payload.get("syncedLyrics")
-    if not isinstance(plain_lyrics, str) and not isinstance(synced_lyrics, str):
+    return _lyrics_result_from_record(payload, duration)
+
+
+def fetch_lrclib_search(artist: str, title: str, duration: float | None) -> LyricsResult | None:
+    """Best-effort LRCLIB search when the exact get endpoint misses (new or niche releases)."""
+    params = {"track_name": title, "artist_name": artist}
+    url = f"https://lrclib.net/api/search?{urlencode(params)}"
+    try:
+        payload = _request_json(url)
+    except (HTTPError, URLError, TimeoutError, ValueError):
         return None
-    synced_lyrics = synced_lyrics if isinstance(synced_lyrics, str) else ""
-    plain_lyrics = plain_lyrics if isinstance(plain_lyrics, str) else synced_lyrics
-    lines, has_word_timing = parse_lrc(synced_lyrics, duration) if synced_lyrics else (plain_text_lines(plain_lyrics), False)
-    if not lines:
-        lines = plain_text_lines(plain_lyrics)
-    return LyricsResult("lrclib", plain_lyrics, lines, has_word_timing)
+
+    if not isinstance(payload, list):
+        return None
+
+    def record_score(record: object) -> float:
+        if not isinstance(record, dict):
+            return 0.0
+        score = 0.0
+        synced = record.get("syncedLyrics")
+        if isinstance(synced, str) and synced.strip():
+            score += 3.0
+        record_duration = record.get("duration")
+        if duration is not None and isinstance(record_duration, (int, float)):
+            score += max(0.0, 2.0 - abs(float(record_duration) - duration))
+        return score
+
+    candidates = [record for record in payload if isinstance(record, dict)]
+    if not candidates:
+        return None
+    best = max(candidates, key=record_score)
+    return _lyrics_result_from_record(best, duration)
 
 
 class _GeniusLyricsParser(HTMLParser):
@@ -200,52 +243,153 @@ def _normalize_match(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
+def _hit_score(result: dict, artist: str, title: str) -> int:
+    raw_title = re.sub(
+        r"\((?:romanized|romanised|english translation|translation)\)",
+        "",
+        str(result.get("title", "")),
+        flags=re.IGNORECASE,
+    )
+    hit_title = _normalize_match(raw_title)
+    primary_artist = result.get("primary_artist")
+    hit_artist = ""
+    if isinstance(primary_artist, dict):
+        hit_artist = _normalize_match(str(primary_artist.get("name", "")))
+    wanted_title = _normalize_match(title)
+    wanted_artist = _normalize_match(artist)
+    score = 0
+
+    if wanted_title:
+        if hit_title == wanted_title:
+            score += 6
+        elif wanted_title in hit_title:
+            score += 3
+    if wanted_artist:
+        if hit_artist == wanted_artist:
+            score += 6
+        elif wanted_artist and wanted_artist in hit_artist:
+            score += 2
+        # Prefer romanized pages for Asian releases: they are singable by
+        # non-native speakers and match how fans search these tracks.
+        # The bonus outweighs the original page's exact artist match.
+        if hit_artist == "geniusromanizations":
+            score += 10
+    return score
+
+
+def _genius_hit_results(artist: str, title: str) -> list[dict]:
+    token = os.getenv("GENIUS_ACCESS_TOKEN")
+    query = quote_plus(f"{artist} {title}")
+    if token:
+        payload = _request_json(
+            f"https://api.genius.com/search?q={query}",
+            {"Authorization": f"Bearer {token}"},
+        )
+        hits = payload.get("response", {}).get("hits", []) if isinstance(payload, dict) else []
+        return [
+            hit.get("result", {})
+            for hit in hits
+            if isinstance(hit, dict) and isinstance(hit.get("result"), dict)
+        ]
+
+    # Public web endpoint used by genius.com itself; no token required.
+    payload = _request_json(f"https://genius.com/api/search?q={query}")
+    if not isinstance(payload, dict):
+        return []
+    response = payload.get("response")
+    if not isinstance(response, dict):
+        return []
+
+    # The public search returns a flat hits list; older variants used sections.
+    flat_hits = response.get("hits")
+    if isinstance(flat_hits, list):
+        return [
+            hit.get("result", {})
+            for hit in flat_hits
+            if isinstance(hit, dict)
+            and hit.get("type") in (None, "song")
+            and isinstance(hit.get("result"), dict)
+        ]
+
+    results: list[dict] = []
+    sections = response.get("sections")
+    for section in sections if isinstance(sections, list) else []:
+        if isinstance(section, dict) and section.get("type") == "song":
+            for hit in section.get("hits", []):
+                if isinstance(hit, dict) and isinstance(hit.get("result"), dict):
+                    results.append(hit["result"])
+    return results
+
+
+def _clean_genius_page(text: str) -> str:
+    """Drop page chrome (contributors header, translation menu, title heading)."""
+    heading = re.search(r"\bLyrics\s*", text)
+    if heading:
+        text = text[heading.end():]
+
+    cleaned_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            cleaned_lines.append("")
+            continue
+        lowered = stripped.lower()
+        if "contributor" in lowered or "translation" in lowered:
+            continue
+        cleaned_lines.append(stripped)
+    return "\n".join(cleaned_lines).strip()
+
+
 def fetch_genius(artist: str, title: str, duration: float | None = None) -> LyricsResult | None:
     del duration
-    token = os.getenv("GENIUS_ACCESS_TOKEN")
-    if not token:
-        return None
-
     try:
-        search_url = f"https://api.genius.com/search?q={quote_plus(f'{artist} {title}')}"
-        payload = _request_json(search_url, {"Authorization": f"Bearer {token}"})
-        hits = payload.get("response", {}).get("hits", []) if isinstance(payload, dict) else []
-        selected_url: str | None = None
-        for hit in hits:
-            result = hit.get("result", {}) if isinstance(hit, dict) else {}
-            hit_title = result.get("title", "")
-            primary_artist = result.get("primary_artist", {}).get("name", "")
-            if _normalize_match(title) in _normalize_match(hit_title) and _normalize_match(artist) in _normalize_match(primary_artist):
-                selected_url = result.get("url")
-                break
-        if not selected_url and hits:
-            selected_url = hits[0].get("result", {}).get("url")
+        hit_results = _genius_hit_results(artist, title)
+        if not hit_results:
+            return None
+
+        scored = sorted(
+            ((_hit_score(result, artist, title), result) for result in hit_results),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        best_score, best_result = scored[0]
+        selected_result = best_result if best_score > 0 else hit_results[0]
+        selected_url = str(selected_result.get("url") or "")
         if not selected_url:
             return None
 
-        request = Request(selected_url, headers={"User-Agent": "Lyricast/0.1"})
+        request = Request(selected_url, headers={"User-Agent": BROWSER_UA})
         with urlopen(request, timeout=20) as response:
             page = response.read().decode("utf-8", errors="replace")
         parser = _GeniusLyricsParser()
         parser.feed(page)
-        plain_lyrics = "\n".join(block.strip() for block in parser.blocks if block.strip())
+        raw_lyrics = "\n".join(block.strip() for block in parser.blocks if block.strip())
+        plain_lyrics = _clean_genius_page(raw_lyrics)
         if not plain_lyrics:
             return None
-        return LyricsResult("genius", plain_lyrics, plain_text_lines(plain_lyrics), False)
+
+        primary_artist = selected_result.get("primary_artist")
+        is_romanized = (
+            isinstance(primary_artist, dict)
+            and _normalize_match(str(primary_artist.get("name", ""))) == "geniusromanizations"
+        )
+        provider = "genius-romanized" if is_romanized else "genius"
+        return LyricsResult(provider, plain_lyrics, plain_text_lines(plain_lyrics), False)
     except (HTTPError, URLError, TimeoutError, ValueError, KeyError, AttributeError):
         return None
 
 
 def fetch_lyrics(artist: str, title: str, duration: float | None) -> LyricsResult:
-    lrclib = fetch_lrclib(artist, title, duration)
-    if lrclib:
-        return lrclib
+    lrclib_exact = fetch_lrclib(artist, title, duration)
+    if lrclib_exact:
+        return lrclib_exact
+
+    lrclib_search = fetch_lrclib_search(artist, title, duration)
+    if lrclib_search:
+        return lrclib_search
 
     genius = fetch_genius(artist, title, duration)
     if genius:
         return genius
 
-    raise RuntimeError(
-        "No lyrics were found. LRCLIB returned no result; set GENIUS_ACCESS_TOKEN "
-        "to enable the Genius fallback."
-    )
+    raise RuntimeError("No lyrics were found on LRCLIB or Genius (including romanized pages).")
