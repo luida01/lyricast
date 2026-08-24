@@ -1,9 +1,9 @@
 import "dotenv/config";
 import { access, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
-import { downloadCover, searchSpotifyTracks } from "./spotify.js";
+import { downloadCover, scoreSpotifyTrack, searchSpotifyTracks } from "./spotify.js";
 import { downloadAudio, searchYoutubeCandidates, selectYoutubeCandidate } from "./youtube.js";
-import { parseSongQuery, jobSlug } from "./song.js";
+import { getSongQueryVariants, parseSongQuery, jobSlug } from "./song.js";
 import { ensureDirectory, writeJson } from "./util.js";
 import type { GenerateOptions, SpotifyTrack } from "./types.js";
 import { runPythonPipeline } from "./pipeline.js";
@@ -17,12 +17,13 @@ Generate customizable karaoke assets from an artist and song title.
 
 Usage:
   lyricast generate "Artist - Song Title" [options]
+  lyricast generate "Song Title - Artist" [options]
   lyricast generate --artist "Artist" --title "Song Title" [options]
 
 Options:
   --output <dir>       Output root directory (default: out)
-  --artist <name>      Artist name when not using the Artist - Title format
-  --title <name>       Song title when not using the Artist - Title format
+  --artist <name>      Artist name when not using a separated query
+  --title <name>       Song title when not using a separated query
   --language <code>    WhisperX language hint, for example es or en
   --whisper-model <n>  WhisperX model (default: small)
   --yes                Automatically select the highest-ranked YouTube result
@@ -116,12 +117,28 @@ function displayTrack(track: SpotifyTrack): void {
 
 async function generate(options: GenerateOptions): Promise<void> {
   const song = parseSongQuery(options.query, options.artist, options.title);
-  console.log(`Searching Spotify for: ${song.artist ? `${song.artist} - ` : ""}${song.title}`);
+  console.log(`Searching Spotify for: ${song.raw}`);
 
-  const spotifyTracks = await searchSpotifyTracks(song);
-  const track = spotifyTracks[0];
-  if (!track) {
+  const queryVariants = options.artist && options.title ? [song] : getSongQueryVariants(song);
+  const rankedTracks = new Map<string, { track: SpotifyTrack; score: number; query: typeof song }>();
+  for (const queryVariant of queryVariants) {
+    const spotifyTracks = await searchSpotifyTracks(queryVariant);
+    for (const candidate of spotifyTracks) {
+      const score = scoreSpotifyTrack(candidate, queryVariant);
+      const current = rankedTracks.get(candidate.id);
+      if (!current || score > current.score) {
+        rankedTracks.set(candidate.id, { track: candidate, score, query: queryVariant });
+      }
+    }
+  }
+
+  const bestMatch = [...rankedTracks.values()].sort((left, right) => right.score - left.score)[0];
+  if (!bestMatch) {
     throw new Error("Spotify did not return a matching track.");
+  }
+  const track = bestMatch.track;
+  if (bestMatch.query.artist !== song.artist || bestMatch.query.title !== song.title) {
+    console.log(`Interpreted input as: ${track.title} - ${track.artists.join(", ")}`);
   }
   displayTrack(track);
 

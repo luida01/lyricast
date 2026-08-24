@@ -11,7 +11,7 @@ export function parseSongQuery(rawQuery: string | undefined, artist?: string, ti
   }
 
   if (!raw) {
-    throw new Error("Provide a query in the format: Artist - Song Title");
+    throw new Error("Provide a query in the format: Artist - Song Title or Song Title - Artist");
   }
 
   const separator = raw.match(/\s+-\s+/);
@@ -32,6 +32,17 @@ export function parseSongQuery(rawQuery: string | undefined, artist?: string, ti
   }
 
   return { raw, artist: "", title: raw };
+}
+
+export function getSongQueryVariants(song: SongQuery): SongQuery[] {
+  if (!song.artist || !song.title) {
+    return [song];
+  }
+
+  return [
+    song,
+    { raw: song.raw, artist: song.title, title: song.artist },
+  ];
 }
 
 export function jobSlug(song: SongQuery): string {

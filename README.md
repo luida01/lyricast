@@ -69,7 +69,7 @@ Keep `SPOTIFY_MARKET` as a valid two-letter Spotify market such as `US` or chang
 
 ## Usage
 
-The input format is `Artist - Song Title`:
+The input accepts either `Artist - Song Title` or `Song Title - Artist`:
 
 ```powershell
 npm run build

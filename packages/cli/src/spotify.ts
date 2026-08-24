@@ -87,7 +87,7 @@ function mapTrack(item: SpotifySearchItem): SpotifyTrack | undefined {
   };
 }
 
-function scoreTrack(track: SpotifyTrack, query: SongQuery): number {
+export function scoreSpotifyTrack(track: SpotifyTrack, query: SongQuery): number {
   const normalizedTitle = normalizeText(track.title);
   const normalizedQueryTitle = normalizeText(query.title);
   const normalizedArtists = track.artists.map(normalizeText);
@@ -142,7 +142,7 @@ export async function searchSpotifyTracks(query: SongQuery, limit = 5): Promise<
   return (payload.tracks?.items ?? [])
     .map(mapTrack)
     .filter((track): track is SpotifyTrack => Boolean(track))
-    .sort((left, right) => scoreTrack(right, query) - scoreTrack(left, query));
+    .sort((left, right) => scoreSpotifyTrack(right, query) - scoreSpotifyTrack(left, query));
 }
 
 export async function downloadCover(url: string | undefined, filePath: string): Promise<boolean> {
