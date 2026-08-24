@@ -14,4 +14,12 @@ Write-Host "Upgrading pip..."
 Write-Host "Installing Python pipeline dependencies..."
 & $pythonPath -m pip install -r (Join-Path $PSScriptRoot "requirements.txt")
 
+$nvidia = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+if ($null -ne $nvidia) {
+    Write-Host "NVIDIA GPU detected. Installing CUDA-enabled PyTorch..."
+    & $pythonPath -m pip install --upgrade --index-url https://download.pytorch.org/whl/cu128 torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0
+} else {
+    Write-Host "No NVIDIA GPU detected. Keeping the CPU PyTorch installation."
+}
+
 Write-Host "Python pipeline setup complete."

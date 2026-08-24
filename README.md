@@ -47,7 +47,7 @@ apps/web/           Next.js app planned for Phase 3
 - A Spotify developer app with client credentials
 - A machine with enough storage for audio files and ML models
 
-An NVIDIA GPU is strongly recommended for faster Demucs and WhisperX processing, but CPU processing is supported for local experimentation.
+An NVIDIA GPU is strongly recommended for faster Demucs and WhisperX processing, but CPU processing is supported for local experimentation. On Windows, `setup.ps1` detects `nvidia-smi` and installs the CUDA-enabled PyTorch build automatically. The current pipeline uses NVIDIA CUDA; integrated Intel or AMD graphics are not automatically supported by Demucs and WhisperX.
 
 ## Setup
 
@@ -64,6 +64,8 @@ Create the Python environment and install the media/ML dependencies:
 ```
 
 Copy `.env.example` to `.env` and fill in the Spotify credentials. `dotenv` loads this file automatically when the CLI starts.
+
+Keep `SPOTIFY_MARKET` as a valid two-letter Spotify market such as `US` or change it to the market you want to search. It is required because the CLI uses the Client Credentials flow rather than a user access token.
 
 ## Usage
 

@@ -116,7 +116,7 @@ def apply_transcript_timings(
         for run in runs:
             previous = max((index for index in anchors if index < run[0]), default=None)
             following = min((index for index in anchors if index > run[-1]), default=None)
-            left = anchors[previous][1] if previous is not None else (bounds[0], bounds[0])
+            left = anchors[previous] if previous is not None else (bounds[0], bounds[0])
             right = anchors[following] if following is not None else (bounds[1], bounds[1])
             available_start = left[1]
             available_end = right[0]
@@ -128,11 +128,12 @@ def apply_transcript_timings(
                 end = available_start + step * (offset + 1)
                 anchors[word_index] = (start, max(end, start + 0.08))
 
+        anchor_indices = {index for index, _timing in line_known[line_index]}
         for word_index, word in enumerate(line.words):
             start, end = anchors.get(word_index, bounds)
             word.start = start
             word.end = max(end, start + 0.08)
-            word.estimated = word_index not in {index for index, _timing in line_known[line_index]}
+            word.estimated = word_index not in anchor_indices
         line.start = bounds[0]
         line.end = bounds[1]
 

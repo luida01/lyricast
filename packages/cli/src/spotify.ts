@@ -25,6 +25,12 @@ interface SpotifySearchResponse {
   };
 }
 
+interface SpotifyErrorResponse {
+  error?: {
+    message?: string;
+  };
+}
+
 let cachedToken: { value: string; expiresAt: number } | undefined;
 
 async function getAccessToken(): Promise<string> {
@@ -115,12 +121,21 @@ export async function searchSpotifyTracks(query: SongQuery, limit = 5): Promise<
   url.searchParams.set("q", spotifyQuery);
   url.searchParams.set("type", "track");
   url.searchParams.set("limit", String(limit));
+  url.searchParams.set("market", process.env.SPOTIFY_MARKET || "US");
 
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
-    throw new Error(`Spotify search failed (${response.status} ${response.statusText})`);
+    let detail = "";
+    try {
+      const errorPayload = (await response.json()) as SpotifyErrorResponse;
+      detail = errorPayload.error?.message ?? "";
+    } catch {
+      detail = "";
+    }
+    const suffix = detail ? `: ${detail}` : "";
+    throw new Error(`Spotify search failed (${response.status} ${response.statusText})${suffix}`);
   }
 
   const payload = (await response.json()) as SpotifySearchResponse;

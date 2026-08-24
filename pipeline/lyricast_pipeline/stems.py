@@ -9,6 +9,12 @@ from pathlib import Path
 def separate_audio(input_path: Path, output_directory: Path, model: str = "htdemucs") -> tuple[Path, Path, Path]:
     stems_directory = output_directory / ".stems"
     stems_directory.mkdir(parents=True, exist_ok=True)
+    try:
+        import torch
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        device = "cpu"
     command = [
         sys.executable,
         "-m",
@@ -16,6 +22,8 @@ def separate_audio(input_path: Path, output_directory: Path, model: str = "htdem
         "--two-stems=vocals",
         "-n",
         model,
+        "--device",
+        device,
         "-o",
         str(stems_directory),
         str(input_path),
