@@ -1,0 +1,19 @@
+{
+  "name": "@lyricast/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Lyricast command-line pipeline orchestrator.",
+  "bin": {
+    "lyricast": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7"
+  }
+}

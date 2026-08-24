@@ -1,0 +1,24 @@
+{
+  "name": "lyricast",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generate customizable karaoke videos with word-level synchronized lyrics.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @lyricast/cli",
+    "typecheck": "npm run typecheck --workspace @lyricast/cli",
+    "test": "npm run typecheck && python -m unittest discover -s pipeline/tests",
+    "dev": "tsx packages/cli/src/index.ts",
+    "lyricast": "node packages/cli/dist/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}
