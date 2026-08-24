@@ -33,6 +33,22 @@ class LyricsParsingTests(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertEqual(lines[1].words[0].text, "Second")
 
+    def test_drops_section_tags_from_plain_lyrics(self) -> None:
+        lines = plain_text_lines(
+            "[Chorus: Seonghyeon, Martin]\nCan we pack it up?\n[Outro]"
+        )
+
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].text, "Can we pack it up?")
+
+    def test_drops_section_tags_from_synced_lyrics(self) -> None:
+        lines, has_word_timing = parse_lrc(
+            "[00:01.00][Verse 1]Hello world\n[00:03.50][Chorus: A, B]Again"
+        )
+
+        self.assertFalse(has_word_timing)
+        self.assertEqual([line.text for line in lines], ["Hello world", "Again"])
+
     def test_applies_word_timestamps_without_estimation(self) -> None:
         lines = [LyricLine("Hello world", [LyricWord("Hello"), LyricWord("world")])]
         transcript = [

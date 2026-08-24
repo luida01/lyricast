@@ -51,6 +51,15 @@ def tokenize(text: str) -> list[str]:
     return re.findall(r"\S+", text.strip())
 
 
+# Section markers such as [Chorus: Seonghyeon, Martin], [Intro] or [Verse 1]
+# are structural metadata, not singable lyrics, so they never reach the video.
+SECTION_TAG_RE = re.compile(r"\[[^\]\n]*\]")
+
+
+def strip_section_tags(text: str) -> str:
+    return SECTION_TAG_RE.sub(" ", text).strip()
+
+
 def _word_chunks(payload: str) -> list[tuple[float, list[str], Optional[float]]]:
     tags = list(WORD_TIMESTAMP_RE.finditer(payload))
     chunks: list[tuple[float, list[str], Optional[float]]] = []
@@ -83,7 +92,9 @@ def parse_lrc(content: str, duration: float | None = None) -> tuple[list[LyricLi
         line_start = timestamp_seconds(
             line_tags[0].group(1), line_tags[0].group(2), line_tags[0].group(3)
         )
-        payload = raw_line[line_tags[-1].end():].strip()
+        payload = strip_section_tags(raw_line[line_tags[-1].end():])
+        if not payload:
+            continue
         word_chunks = _word_chunks(payload)
         if word_chunks:
             has_word_timing = True
@@ -95,7 +106,7 @@ def parse_lrc(content: str, duration: float | None = None) -> tuple[list[LyricLi
                     word_end = start + step * (index + 1) if step else None
                     words.append(LyricWord(word, word_start, word_end))
             lines.append(LyricLine(payload, words, line_start))
-        elif payload:
+        else:
             lines.append(LyricLine(payload, [LyricWord(word) for word in tokenize(payload)], line_start))
 
     lines.sort(key=lambda line: line.start if line.start is not None else 0.0)
@@ -124,7 +135,7 @@ def parse_lrc(content: str, duration: float | None = None) -> tuple[list[LyricLi
 def plain_text_lines(content: str) -> list[LyricLine]:
     lines: list[LyricLine] = []
     for raw_line in content.splitlines():
-        text = raw_line.strip()
+        text = strip_section_tags(raw_line)
         if not text or METADATA_RE.match(text):
             continue
         words = [LyricWord(word) for word in tokenize(text)]
