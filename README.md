@@ -95,7 +95,9 @@ Useful options:
 --yes                Accept the first YouTube candidate
 ```
 
-The `--language` option is optional. If omitted, WhisperX detects the language automatically. It only affects voice transcription and alignment; lyrics remain in their original language and are never translated or filtered by this option.
+The `--language` option is optional. If omitted, WhisperX detects the language from the audio. This option only affects voice transcription and alignment; lyrics remain in their original language and are never translated or filtered. Romanized lyrics are kept as provided and are aligned against the detected vocal language.
+
+The first run downloads the selected Whisper ASR model and one language-specific alignment model. Hugging Face caches both locally and reuses them for later songs, so a Korean alignment model is not downloaded again for every Korean track. A new language may require one additional alignment model.
 
 Each generated song is written to `out/<artist>-<title>/`:
 
