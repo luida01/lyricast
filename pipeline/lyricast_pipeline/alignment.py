@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import difflib
 import gc
 import re
@@ -7,6 +8,7 @@ import unicodedata
 from pathlib import Path
 
 from .lyrics import LyricLine, LyricWord
+from .romanize import romanize_korean
 
 
 def normalize_word(value: str) -> str:
@@ -45,7 +47,7 @@ def _map_transcript_words(
                 similarity = difflib.SequenceMatcher(
                     None, lyric_tokens[lyric_index], transcript_tokens[transcript_index]
                 ).ratio()
-                if similarity >= 0.55:
+                if similarity >= 0.5:
                     mapping[lyric_index] = transcript_index
     return mapping
 
@@ -61,8 +63,18 @@ def _number(value: object, default: float) -> float:
 def apply_transcript_timings(
     lines: list[LyricLine], transcript_words: list[dict[str, object]], duration: float | None
 ) -> list[LyricLine]:
+    # WhisperX transcribes the sung language (e.g. Korean); the displayed lyrics are
+    # romanized, so transliterate the transcript to romaja before matching. This lets
+    # difflib align real word timings against the romanized lyrics instead of marking
+    # every word as estimated.
+    romanized_transcript: list[dict[str, object]] = []
+    for word in transcript_words:
+        cloned = copy.copy(word)
+        cloned["word"] = romanize_korean(str(word.get("word", "")))
+        romanized_transcript.append(cloned)
+
     flattened = _flatten(lines)
-    mapping = _map_transcript_words([item[2] for item in flattened], transcript_words)
+    mapping = _map_transcript_words([item[2] for item in flattened], romanized_transcript)
     known: dict[int, tuple[float, float]] = {}
     for lyric_index, transcript_index in mapping.items():
         transcript = transcript_words[transcript_index]

@@ -9,7 +9,7 @@
   "scripts": {
     "build": "npm run build --workspace @lyricast/cli",
     "typecheck": "npm run typecheck --workspace @lyricast/cli",
-    "test": "npm run typecheck && python -m unittest discover -s pipeline/tests",
+    "test": "npm run typecheck && set PYTHONPATH=pipeline && pipeline\\.venv\\Scripts\\python.exe -m unittest discover -s pipeline/tests",
     "dev": "tsx packages/cli/src/index.ts",
     "lyricast": "node packages/cli/dist/index.js"
   },

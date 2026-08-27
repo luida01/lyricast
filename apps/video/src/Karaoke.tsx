@@ -242,6 +242,29 @@ export const Karaoke: React.FC<KaraokeProps> = ({ audioSrc, coverSrc, sync, styl
 
   const activeNow = lineTimings.findIndex((line) => t >= line.start && t < line.end);
 
+  // Effective per-word timings: keep real WhisperX timings, but fill any word still
+  // marked estimated with a proportional slot across its line so the karaoke still
+  // highlights word-by-word instead of all at once.
+  const effectiveLines = useMemo(
+    () =>
+      lineTimings.map((line) => {
+        const start = line.start ?? 0;
+        const end = line.end ?? start + Math.max(1.0, line.words.length * 0.4);
+        const span = Math.max(0.3, end - start);
+        const n = Math.max(1, line.words.length);
+        const words = line.words.map((word, index) => {
+          if (word.start != null && word.start != null && !word.estimated) {
+            return word;
+          }
+          const wordStart = start + (index / n) * span;
+          const wordEnd = start + ((index + 1) / n) * span;
+          return { ...word, start: wordStart, end: Math.max(wordEnd, wordStart + 0.08) };
+        });
+        return { ...line, words };
+      }),
+    [lineTimings],
+  );
+
   // Pure-function scroll position (no per-frame state): glides smoothly between
   // lines and, crucially, keeps moving across instrumental gaps instead of freezing.
   const idxFloat = useMemo(() => {
@@ -287,7 +310,7 @@ export const Karaoke: React.FC<KaraokeProps> = ({ audioSrc, coverSrc, sync, styl
               alignItems: "center",
             }}
           >
-            {lineTimings.slice(windowStart, windowEnd).map((line, i) => {
+            {effectiveLines.slice(windowStart, windowEnd).map((line, i) => {
               const actualIndex = windowStart + i;
               const isActive = actualIndex === activeNow && activeNow >= 0;
               const dist = Math.abs(actualIndex - idxFloat);

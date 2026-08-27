@@ -17,7 +17,7 @@
     "@remotion/cli": "^4.0.0",
     "@remotion/renderer": "^4.0.0",
     "jpeg-js": "^0.4.4",
-    "zod": "^3.23.0"
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

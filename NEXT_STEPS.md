@@ -42,10 +42,10 @@ Status: Phase 1 complete. The CLI produces synced karaoke assets from a song que
 
 ## Backlog / Improvements
 
-- Alignment quality: reduce "estimated" words
-  - Filter ad-libs and repeated refrains during lyric/transcript matching
-  - Tune fuzzy matching threshold
-  - Prefer LRCLIB enhanced LRC when available
+- Alignment quality: transliteration Hangul->romaja implemented (pipeline romanize.py +
+  alignment.py). Jung Kook dropped from 98% to ~61% estimated words; remaining filled by
+  proportional highlight in the video. Still to tune: lower fuzzy threshold, filter ad-libs,
+  prefer LRCLIB enhanced LRC when available.
 - Handle empty/instrumental lyrics gracefully
 - meta.json: record failure state on pipeline errors
 - Device profiles: auto | cuda | cpu (explicit override)

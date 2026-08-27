@@ -1,3 +1,4 @@
 yt-dlp>=2025.1.0
 demucs>=4.0.1
 whisperx>=3.3.0
+jamo>=0.4.1
