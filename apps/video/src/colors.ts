@@ -79,6 +79,43 @@ export function darken(hex: string, amount: number): string {
   return rgbToHex(r * (1 - amount), g * (1 - amount), b * (1 - amount));
 }
 
+function hslToHex(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
+}
+
+export function boostSaturation(hex: string, target: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  const l = (max + min) / 2;
+  const delta = max - min;
+  let h = 0;
+  if (delta !== 0) {
+    const rr = (max - r / 255) / delta;
+    const gg = (max - g / 255) / delta;
+    const bb = (max - b / 255) / delta;
+    if (max === r / 255) h = bb - gg;
+    else if (max === g / 255) h = 2 + rr - bb;
+    else h = 4 + gg - rr;
+    h = (h * 60 + 360) % 360;
+  }
+  const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+  const clampedL = Math.min(0.55, Math.max(0.3, l));
+  return hslToHex(h, Math.max(s, target), clampedL);
+}
+
 export interface KaraokeColors {
   background: string;
   text: string;

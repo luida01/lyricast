@@ -79,6 +79,28 @@ class AlignmentTest(unittest.TestCase):
         timed = apply_transcript_timings(lines, transcript, 3.0)
         self.assertTrue(all(w.estimated for w in timed[0].words))
 
+    def test_anchorless_line_gets_interpolated_bounds(self) -> None:
+        lines = [
+            LyricLine("a b", [LyricWord("a"), LyricWord("b")], None, None),
+            LyricLine("c d", [LyricWord("c"), LyricWord("d")], None, None),
+            LyricLine("e f", [LyricWord("e"), LyricWord("f")], None, None),
+        ]
+        transcript = [
+            {"word": "a", "start": 1.0, "end": 1.5},
+            {"word": "b", "start": 1.5, "end": 2.0},
+            {"word": "e", "start": 5.0, "end": 5.5},
+            {"word": "f", "start": 5.5, "end": 6.0},
+        ]
+
+        timed = apply_transcript_timings(lines, transcript, 8.0)
+
+        self.assertEqual(timed[0].start, 1.0)
+        self.assertEqual(timed[2].start, 5.0)
+        self.assertGreaterEqual(timed[1].start, timed[0].end)
+        self.assertLess(timed[1].start, timed[2].start)
+        self.assertGreater(timed[1].end - timed[1].start, 0.8)
+        self.assertLessEqual(timed[1].end, timed[2].start + 0.001)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -60,6 +60,65 @@ def _number(value: object, default: float) -> float:
         return default
 
 
+def _compute_line_bounds(
+    lines: list[LyricLine],
+    line_known: list[list[tuple[int, tuple[float, float]]]],
+    duration: float | None,
+) -> list[tuple[float, float]]:
+    """Compute sane, contiguous line boundaries.
+
+    Anchor-bearing lines start at their first matched word; anchor-less lines are
+    interpolated evenly between the previous and next anchor. Line ends are the next
+    line's start (or the song duration for the last line), so no gap or absurdly short
+    window (e.g. 0.2s) can appear.
+    """
+    count = len(lines)
+    raw_start: list[float | None] = []
+    raw_end: list[float | None] = []
+    for anchors in line_known:
+        raw_start.append(anchors[0][1][0] if anchors else None)
+        raw_end.append(anchors[-1][1][1] if anchors else None)
+
+    start: list[float] = [0.0] * count
+    index = 0
+    while index < count:
+        if raw_start[index] is not None:
+            start[index] = raw_start[index]
+            index += 1
+            continue
+        run_begin = index
+        while index < count and raw_start[index] is None:
+            index += 1
+        run_end = index
+        previous_time = (
+            raw_end[run_begin - 1]
+            if run_begin > 0 and raw_end[run_begin - 1] is not None
+            else 0.0
+        )
+        next_time: float | None = None
+        for future in range(run_end, count):
+            if raw_start[future] is not None:
+                next_time = raw_start[future]
+                break
+        if next_time is None:
+            next_time = duration if duration else previous_time + max(2.0, (run_end - run_begin) * 2.0)
+        span = max(next_time - previous_time, (run_end - run_begin) * 0.6)
+        for offset in range(run_end - run_begin):
+            fraction = (offset + 1) / (run_end - run_begin + 1)
+            start[run_begin + offset] = previous_time + span * fraction
+
+    bounds: list[tuple[float, float]] = []
+    for i, line in enumerate(lines):
+        end = start[i + 1] if i + 1 < count else (duration if duration else start[i] + 2.0)
+        if raw_end[i] is not None:
+            end = max(end, raw_end[i])
+        minimum = start[i] + max(0.8, len(line.words) * 0.3)
+        if end < minimum:
+            end = minimum
+        bounds.append((start[i], end))
+    return bounds
+
+
 def apply_transcript_timings(
     lines: list[LyricLine], transcript_words: list[dict[str, object]], duration: float | None
 ) -> list[LyricLine]:
@@ -87,29 +146,7 @@ def apply_transcript_timings(
         if lyric_index in known:
             line_known[line_index].append((word_index, known[lyric_index]))
 
-    line_bounds: list[tuple[float, float]] = []
-    for line_index, line in enumerate(lines):
-        anchors = line_known[line_index]
-        start = anchors[0][1][0] if anchors else None
-        end = anchors[-1][1][1] if anchors else None
-        if start is None:
-            start = line.start
-        if end is None:
-            end = line.end
-
-        if start is None:
-            previous_end = line_bounds[-1][1] if line_bounds else 0.0
-            start = previous_end
-        if end is None:
-            next_anchor_start = None
-            for future in line_known[line_index + 1:]:
-                if future:
-                    next_anchor_start = future[0][1][0]
-                    break
-            end = next_anchor_start if next_anchor_start is not None else duration
-        if end is None or end <= start:
-            end = start + max(1.0, len(line.words) * 0.4)
-        line_bounds.append((start, end))
+    line_bounds = _compute_line_bounds(lines, line_known, duration)
 
     for line_index, line in enumerate(lines):
         bounds = line_bounds[line_index]

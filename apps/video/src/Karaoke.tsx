@@ -253,7 +253,7 @@ export const Karaoke: React.FC<KaraokeProps> = ({ audioSrc, coverSrc, sync, styl
         const span = Math.max(0.3, end - start);
         const n = Math.max(1, line.words.length);
         const words = line.words.map((word, index) => {
-          if (word.start != null && word.start != null && !word.estimated) {
+          if (word.start != null && !word.estimated) {
             return word;
           }
           const wordStart = start + (index / n) * span;
@@ -292,7 +292,7 @@ export const Karaoke: React.FC<KaraokeProps> = ({ audioSrc, coverSrc, sync, styl
 
   const progress = Math.min(1, Math.max(0, t / duration));
 
-  return (
+return (
     <AbsoluteFill style={{ backgroundColor: colors.background }}>
       <Background style={resolved} coverSrc={coverSrc} bgColor={colors.background} />
       <Audio src={audioSrc} />

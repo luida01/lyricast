@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import jpeg from "jpeg-js";
-import { rgbToHex } from "../src/colors";
+import { boostSaturation, rgbToHex } from "../src/colors";
 
 const videoDir = path.resolve(fileURLToPath(import.meta.url), "..", "..");
 const repoRoot = path.resolve(videoDir, "..", "..");
@@ -50,8 +50,9 @@ if (fs.existsSync(coverPath)) {
       g += data[i + 1];
       b += data[i + 2];
     }
-    baseColor = rgbToHex(r / n, g / n, b / n);
-    console.log(`Sampled cover base color: ${baseColor}`);
+    const average = rgbToHex(r / n, g / n, b / n);
+    baseColor = boostSaturation(average, 0.5);
+    console.log(`Sampled cover base color: ${average} -> ${baseColor}`);
   } catch (err) {
     console.warn(`Could not decode cover.jpg: ${err}`);
   }
