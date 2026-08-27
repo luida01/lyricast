@@ -66,6 +66,29 @@ class AlignmentTest(unittest.TestCase):
         self.assertFalse(timed[0].words[0].estimated)
         self.assertFalse(timed[0].words[1].estimated)
 
+    def test_repeated_refrain_matches_at_multiple_positions(self) -> None:
+        lines = [
+            LyricLine("hello world", [LyricWord("hello"), LyricWord("world")], None, None),
+            LyricLine("other words", [LyricWord("other"), LyricWord("words")], None, None),
+            LyricLine("hello world", [LyricWord("hello"), LyricWord("world")], None, None),
+        ]
+        transcript = [
+            {"word": "hello", "start": 1.0, "end": 1.4},
+            {"word": "world", "start": 1.4, "end": 1.8},
+            {"word": "other", "start": 3.0, "end": 3.4},
+            {"word": "words", "start": 3.4, "end": 3.8},
+            {"word": "hello", "start": 5.0, "end": 5.4},
+            {"word": "world", "start": 5.4, "end": 5.8},
+        ]
+
+        timed = apply_transcript_timings(lines, transcript, 7.0)
+
+        self.assertEqual(timed[0].start, 1.0)
+        self.assertEqual(timed[1].start, 3.0)
+        self.assertEqual(timed[2].start, 5.0)
+        self.assertFalse(timed[2].words[0].estimated)
+        self.assertFalse(timed[2].words[1].estimated)
+
     def test_unmatched_words_remain_estimated(self) -> None:
         lines = [
             LyricLine(

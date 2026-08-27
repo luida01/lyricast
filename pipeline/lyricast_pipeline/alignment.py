@@ -28,27 +28,42 @@ def _flatten(lines: list[LyricLine]) -> list[tuple[int, int, LyricWord]]:
 def _map_transcript_words(
     lyric_words: list[LyricWord], transcript_words: list[dict[str, object]]
 ) -> dict[int, int]:
+    """Monotonic forward alignment of lyric tokens against transcript tokens.
+
+    Unlike a global SequenceMatcher, the transcript cursor only moves forward, so
+    repeated refrains can match again at later positions instead of leaving all
+    copies but the first unmatched.
+    """
     lyric_tokens = [normalize_word(word.text) for word in lyric_words]
     transcript_tokens = [normalize_word(str(word.get("word", ""))) for word in transcript_words]
-    matcher = difflib.SequenceMatcher(None, lyric_tokens, transcript_tokens, autojunk=False)
+    used: set[int] = set()
     mapping: dict[int, int] = {}
+    transcript_cursor = 0
 
-    for tag, lyric_start, lyric_end, transcript_start, transcript_end in matcher.get_opcodes():
-        if tag == "equal":
-            for lyric_index, transcript_index in zip(
-                range(lyric_start, lyric_end), range(transcript_start, transcript_end)
-            ):
-                mapping[lyric_index] = transcript_index
-        elif tag == "replace":
-            length = min(lyric_end - lyric_start, transcript_end - transcript_start)
-            for offset in range(length):
-                lyric_index = lyric_start + offset
-                transcript_index = transcript_start + offset
-                similarity = difflib.SequenceMatcher(
-                    None, lyric_tokens[lyric_index], transcript_tokens[transcript_index]
-                ).ratio()
-                if similarity >= 0.5:
-                    mapping[lyric_index] = transcript_index
+    for lyric_index, token in enumerate(lyric_tokens):
+        if not token:
+            continue
+        window_end = min(len(transcript_tokens), transcript_cursor + 60)
+        best_index: int | None = None
+        best_score = 0.0
+        for transcript_index in range(transcript_cursor, window_end):
+            if transcript_index in used:
+                continue
+            candidate = transcript_tokens[transcript_index]
+            if not candidate:
+                continue
+            if token == candidate:
+                best_index = transcript_index
+                best_score = 1.0
+                break
+            similarity = difflib.SequenceMatcher(None, token, candidate).ratio()
+            if similarity > best_score:
+                best_score = similarity
+                best_index = transcript_index
+        if best_index is not None and best_score >= 0.5:
+            mapping[lyric_index] = best_index
+            used.add(best_index)
+            transcript_cursor = best_index + 1
     return mapping
 
 

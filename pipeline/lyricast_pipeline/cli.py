@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .alignment import apply_transcript_timings, estimate_line_timings, transcribe_words
 from .lyrics import LyricLine, LyricsResult, fetch_lyrics
+from .romanize import romanize_korean
 from .stems import separate_audio
 
 
@@ -19,6 +20,7 @@ def build_sync_payload(
     timing_source: str,
     language: str | None,
     alignment_error: str | None = None,
+    alignment_stats: dict[str, object] | None = None,
 ) -> dict[str, object]:
     serialized_lines: list[dict[str, object]] = []
     serialized_words: list[dict[str, object]] = []
@@ -52,7 +54,23 @@ def build_sync_payload(
     }
     if alignment_error:
         payload["alignmentError"] = alignment_error
+    if alignment_stats:
+        payload["alignment"] = alignment_stats
     return payload
+
+
+def _alignment_stats(lines: list[LyricLine], timing_source: str) -> dict[str, object]:
+    words = [word for line in lines for word in line.words]
+    total = len(words)
+    matched = sum(1 for word in words if not word.estimated)
+    estimated = total - matched
+    return {
+        "totalWords": total,
+        "matchedWords": matched,
+        "estimatedWords": estimated,
+        "alignmentConfidence": round(matched / total, 2) if total else 0.0,
+        "timingSource": timing_source,
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,6 +84,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--whisper-model", default="small")
     parser.add_argument("--demucs-model", default="htdemucs")
     parser.add_argument("--keep-stems", action="store_true")
+    parser.add_argument("--force-separate", action="store_true", help="Re-run Demucs even if stems exist")
+    parser.add_argument("--force-align", action="store_true", help="Re-run WhisperX even if transcript cache exists")
+    parser.add_argument("--force", action="store_true", help="Re-run both separation and alignment")
     return parser.parse_args()
 
 
@@ -81,35 +102,93 @@ def main() -> int:
     if not input_path.exists():
         raise RuntimeError(f"Input audio does not exist: {input_path}")
 
+    force_separate = args.force_separate or args.force
+    force_align = args.force_align or args.force
+
     print(f"Fetching lyrics for {args.artist} - {args.title}...")
     lyrics = fetch_lyrics(args.artist, args.title, args.duration)
     (output_directory / "lyrics.txt").write_text(lyrics.plain_lyrics, encoding="utf-8")
     print(f"Lyrics provider: {lyrics.provider}")
 
-    print("Separating vocals and instrumental with Demucs...")
-    vocals_path, _instrumental_path, stems_directory = separate_audio(
-        input_path, output_directory, args.demucs_model
-    )
+    vocals_path = output_directory / "vocals.wav"
+    instrumental_path = output_directory / "instrumental.wav"
+    stems_directory = output_directory / ".stems"
+    if vocals_path.exists() and instrumental_path.exists() and not force_separate:
+        print("Reusing existing vocals.wav / instrumental.wav (use --force-separate to redo).")
+    else:
+        print("Separating vocals and instrumental with Demucs...")
+        vocals_path, instrumental_path, stems_directory = separate_audio(
+            input_path, output_directory, args.demucs_model
+        )
 
     timing_source: str
     alignment_error: str | None = None
     detected_language = args.language
+    transcript_path = output_directory / "transcript.json"
+    timed_lines: list[LyricLine]
     if lyrics.has_word_timing:
         timed_lines = lyrics.lines
         timing_source = "lrclib-word"
     else:
+        transcript_words: list[dict[str, object]]
+        if transcript_path.exists() and not force_align:
+            print(f"Reusing transcript cache {transcript_path.name} (use --force-align to redo).")
+            transcript_words = json.loads(transcript_path.read_text(encoding="utf-8"))
+        else:
+            try:
+                transcript_words, detected_language = transcribe_words(
+                    vocals_path, args.language, args.whisper_model
+                )
+                transcript_path.write_text(
+                    json.dumps(transcript_words, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            except Exception as error:  # Keep a usable line-timing artifact for diagnostics.
+                alignment_error = str(error)
+                print(f"Warning: WhisperX alignment failed: {alignment_error}")
+                timed_lines = estimate_line_timings(lyrics.lines, args.duration)
+                timing_source = "line-estimated"
+                stats = _alignment_stats(timed_lines, timing_source)
+                if alignment_error:
+                    stats["error"] = alignment_error
+                sync_payload = build_sync_payload(
+                    args.artist,
+                    args.title,
+                    args.duration,
+                    lyrics,
+                    timed_lines,
+                    timing_source,
+                    detected_language,
+                    alignment_error,
+                    stats,
+                )
+                _write_json(output_directory / "sync.json", sync_payload)
+                (output_directory / "alignment-report.json").write_text(
+                    json.dumps(stats, indent=2, ensure_ascii=True) + "\n", encoding="utf-8"
+                )
+                if not args.keep_stems:
+                    shutil.rmtree(stems_directory, ignore_errors=True)
+                print(f"Wrote {output_directory / 'sync.json'}")
+                return 0
         try:
-            transcript_words, detected_language = transcribe_words(
-                vocals_path, args.language, args.whisper_model
-            )
             timed_lines = apply_transcript_timings(lyrics.lines, transcript_words, args.duration)
             timing_source = "whisperx-aligned"
-        except Exception as error:  # Keep a usable line-timing artifact for diagnostics.
+        except Exception as error:
             alignment_error = str(error)
-            print(f"Warning: WhisperX alignment failed: {alignment_error}")
+            print(f"Warning: alignment step failed: {alignment_error}")
             timed_lines = estimate_line_timings(lyrics.lines, args.duration)
             timing_source = "line-estimated"
 
+        romanized_transcript = [
+            {"word": romanize_korean(str(word.get("word", ""))), **word}
+            for word in transcript_words
+        ]
+        (output_directory / "transcript-romanized.json").write_text(
+            json.dumps(romanized_transcript, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    stats = _alignment_stats(timed_lines, timing_source)
+    if alignment_error:
+        stats["error"] = alignment_error
     sync_payload = build_sync_payload(
         args.artist,
         args.title,
@@ -119,10 +198,17 @@ def main() -> int:
         timing_source,
         detected_language,
         alignment_error,
+        stats,
     )
     _write_json(output_directory / "sync.json", sync_payload)
+    (output_directory / "alignment-report.json").write_text(
+        json.dumps(stats, indent=2, ensure_ascii=True) + "\n", encoding="utf-8"
+    )
     if not args.keep_stems:
         shutil.rmtree(stems_directory, ignore_errors=True)
 
-    print(f"Wrote {output_directory / 'sync.json'}")
+    print(
+        f"Wrote {output_directory / 'sync.json'} "
+        f"(confidence={stats['alignmentConfidence']}, estimated={stats['estimatedWords']})"
+    )
     return 0

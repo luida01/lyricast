@@ -184,7 +184,7 @@ function Background({
   coverSrc: string;
   bgColor: string;
 }) {
-  if (style.background === "cover-blur") {
+if (style.background === "cover-blur") {
     return (
       <AbsoluteFill style={{ overflow: "hidden" }}>
         <Img
@@ -197,7 +197,7 @@ function Background({
             transform: "scale(1.25)",
           }}
         />
-        <AbsoluteFill style={{ backgroundColor: "rgba(0,0,0,0.35)" }} />
+        <AbsoluteFill style={{ backgroundColor: bgColor, opacity: 0.5 }} />
       </AbsoluteFill>
     );
   }

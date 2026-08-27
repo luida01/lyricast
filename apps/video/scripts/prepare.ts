@@ -41,23 +41,51 @@ if (fs.existsSync(coverPath)) {
   try {
     const raw = jpeg.decode(fs.readFileSync(coverPath), { useTArray: true });
     const data = raw.data;
-    let r = 0;
-    let g = 0;
-    let b = 0;
-    const n = data.length / 4;
-    for (let i = 0; i < data.length; i += 4) {
-      r += data[i];
-      g += data[i + 1];
-      b += data[i + 2];
-    }
-    const average = rgbToHex(r / n, g / n, b / n);
-    baseColor = boostSaturation(average, 0.5);
-    console.log(`Sampled cover base color: ${average} -> ${baseColor}`);
+    const dominant = dominantColor(data);
+    baseColor = boostSaturation(dominant, 0.55);
+    console.log(`Sampled cover dominant color: ${dominant} -> ${baseColor}`);
   } catch (err) {
     console.warn(`Could not decode cover.jpg: ${err}`);
   }
 } else {
   console.warn(`No cover.jpg in ${songDir}; using default base color`);
+}
+
+function dominantColor(data: Uint8Array): string {
+  const step = 6;
+  const buckets = new Map<number, { r: number; g: number; b: number; n: number }>();
+  for (let i = 0; i < data.length; i += 4 * step) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    if (max < 25 || min > 235) continue;
+    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    const bucket = buckets.get(key) ?? { r: 0, g: 0, b: 0, n: 0 };
+    bucket.r += r;
+    bucket.g += g;
+    bucket.b += b;
+    bucket.n += 1;
+    buckets.set(key, bucket);
+  }
+  let best: { r: number; g: number; b: number; n: number } | null = null;
+  let bestScore = -1;
+  for (const bucket of buckets.values()) {
+    const r = bucket.r / bucket.n;
+    const g = bucket.g / bucket.n;
+    const b = bucket.b / bucket.n;
+    const mx = Math.max(r, g, b);
+    const mn = Math.min(r, g, b);
+    const chroma = (mx - mn) / 255;
+    const score = bucket.n * (1 + chroma * 2);
+    if (score > bestScore) {
+      bestScore = score;
+      best = bucket;
+    }
+  }
+  if (!best) return "#333333";
+  return rgbToHex(best.r / best.n, best.g / best.n, best.b / best.n);
 }
 
 const defaultStyle = {
