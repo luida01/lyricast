@@ -1,0 +1,29 @@
+{
+  "name": "@lyricast/video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "remotion studio src/index.tsx",
+    "prepare-song": "tsx scripts/prepare.ts",
+    "render": "remotion render Karaoke out.mp4",
+    "render:preview": "remotion render Karaoke out_preview.mp4 --frames=0,900",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "^4.0.0",
+    "@remotion/cli": "^4.0.0",
+    "@remotion/renderer": "^4.0.0",
+    "jpeg-js": "^0.4.4",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}

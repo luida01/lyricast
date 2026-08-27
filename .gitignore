@@ -19,3 +19,11 @@ media/
 
 .stems/
 .models/
+
+# Remotion video app (generated artifacts)
+apps/video/public/
+apps/video/src/current-song.ts
+apps/video/out.mp4
+apps/video/out_preview.mp4
+apps/video/still.png
+
