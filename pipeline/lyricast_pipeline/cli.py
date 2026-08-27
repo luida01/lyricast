@@ -64,13 +64,32 @@ def _alignment_stats(lines: list[LyricLine], timing_source: str) -> dict[str, ob
     total = len(words)
     matched = sum(1 for word in words if not word.estimated)
     estimated = total - matched
+    short_lines: list[int] = []
+    long_lines: list[int] = []
+    for index, line in enumerate(lines):
+        start = line.start or 0.0
+        end = line.end or start
+        duration = end - start
+        if duration < 0.5 and len(line.words) > 3:
+            short_lines.append(index)
+        if duration > 20 and len(line.words) > 0:
+            long_lines.append(index)
     return {
         "totalWords": total,
         "matchedWords": matched,
         "estimatedWords": estimated,
         "alignmentConfidence": round(matched / total, 2) if total else 0.0,
         "timingSource": timing_source,
+        "shortLines": short_lines,
+        "longLines": long_lines,
     }
+
+
+def _romanized_transcript(transcript_words: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {**word, "word": romanize_korean(str(word.get("word", "")))}
+        for word in transcript_words
+    ]
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,8 +124,21 @@ def main() -> int:
     force_separate = args.force_separate or args.force
     force_align = args.force_align or args.force
 
+    duration: float | None = args.duration
+    if duration is None:
+        meta_path = output_directory / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                track = meta.get("track") or {}
+                duration_ms = track.get("durationMs")
+                if duration_ms:
+                    duration = float(duration_ms) / 1000.0
+            except (ValueError, OSError):
+                pass
+
     print(f"Fetching lyrics for {args.artist} - {args.title}...")
-    lyrics = fetch_lyrics(args.artist, args.title, args.duration)
+    lyrics = fetch_lyrics(args.artist, args.title, duration)
     (output_directory / "lyrics.txt").write_text(lyrics.plain_lyrics, encoding="utf-8")
     print(f"Lyrics provider: {lyrics.provider}")
 
@@ -133,19 +165,31 @@ def main() -> int:
         transcript_words: list[dict[str, object]]
         if transcript_path.exists() and not force_align:
             print(f"Reusing transcript cache {transcript_path.name} (use --force-align to redo).")
-            transcript_words = json.loads(transcript_path.read_text(encoding="utf-8"))
+            cached = json.loads(transcript_path.read_text(encoding="utf-8"))
+            if isinstance(cached, dict) and "words" in cached:
+                transcript_words = cached["words"]
+                cached_language = cached.get("language")
+                if cached_language:
+                    detected_language = str(cached_language)
+            else:
+                transcript_words = cached
         else:
             try:
                 transcript_words, detected_language = transcribe_words(
                     vocals_path, args.language, args.whisper_model
                 )
                 transcript_path.write_text(
-                    json.dumps(transcript_words, ensure_ascii=False, indent=2), encoding="utf-8"
+                    json.dumps(
+                        {"language": detected_language, "words": transcript_words},
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
                 )
             except Exception as error:  # Keep a usable line-timing artifact for diagnostics.
                 alignment_error = str(error)
                 print(f"Warning: WhisperX alignment failed: {alignment_error}")
-                timed_lines = estimate_line_timings(lyrics.lines, args.duration)
+                timed_lines = estimate_line_timings(lyrics.lines, duration)
                 timing_source = "line-estimated"
                 stats = _alignment_stats(timed_lines, timing_source)
                 if alignment_error:
@@ -153,7 +197,7 @@ def main() -> int:
                 sync_payload = build_sync_payload(
                     args.artist,
                     args.title,
-                    args.duration,
+                    duration,
                     lyrics,
                     timed_lines,
                     timing_source,
@@ -170,20 +214,17 @@ def main() -> int:
                 print(f"Wrote {output_directory / 'sync.json'}")
                 return 0
         try:
-            timed_lines = apply_transcript_timings(lyrics.lines, transcript_words, args.duration)
+            timed_lines = apply_transcript_timings(lyrics.lines, transcript_words, duration)
             timing_source = "whisperx-aligned"
         except Exception as error:
             alignment_error = str(error)
             print(f"Warning: alignment step failed: {alignment_error}")
-            timed_lines = estimate_line_timings(lyrics.lines, args.duration)
+            timed_lines = estimate_line_timings(lyrics.lines, duration)
             timing_source = "line-estimated"
 
-        romanized_transcript = [
-            {"word": romanize_korean(str(word.get("word", ""))), **word}
-            for word in transcript_words
-        ]
         (output_directory / "transcript-romanized.json").write_text(
-            json.dumps(romanized_transcript, ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps(_romanized_transcript(transcript_words), ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
     stats = _alignment_stats(timed_lines, timing_source)
@@ -192,7 +233,7 @@ def main() -> int:
     sync_payload = build_sync_payload(
         args.artist,
         args.title,
-        args.duration,
+        duration,
         lyrics,
         timed_lines,
         timing_source,
@@ -207,8 +248,14 @@ def main() -> int:
     if not args.keep_stems:
         shutil.rmtree(stems_directory, ignore_errors=True)
 
+    confidence = stats["alignmentConfidence"]
+    if confidence < 0.5:
+        print(
+            f"Warning: low alignment confidence ({confidence}). "
+            "WhisperX may have misdetected the language; consider passing --language."
+        )
     print(
         f"Wrote {output_directory / 'sync.json'} "
-        f"(confidence={stats['alignmentConfidence']}, estimated={stats['estimatedWords']})"
+        f"(confidence={confidence}, estimated={stats['estimatedWords']})"
     )
     return 0

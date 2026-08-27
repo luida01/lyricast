@@ -78,7 +78,7 @@ function dominantColor(data: Uint8Array): string {
     const mx = Math.max(r, g, b);
     const mn = Math.min(r, g, b);
     const chroma = (mx - mn) / 255;
-    const score = bucket.n * (1 + chroma * 2);
+    const score = bucket.n + chroma * 200;
     if (score > bestScore) {
       bestScore = score;
       best = bucket;

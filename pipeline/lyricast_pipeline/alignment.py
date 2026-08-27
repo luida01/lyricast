@@ -43,7 +43,10 @@ def _map_transcript_words(
     for lyric_index, token in enumerate(lyric_tokens):
         if not token:
             continue
-        window_end = min(len(transcript_tokens), transcript_cursor + 60)
+        # Keep the window small so matches stay local: a wide window lets the
+        # cursor jump far ahead to distant near-matches, burning through the
+        # transcript and leaving the rest of the song unmatched.
+        window_end = min(len(transcript_tokens), transcript_cursor + 10)
         best_index: int | None = None
         best_score = 0.0
         for transcript_index in range(transcript_cursor, window_end):
@@ -123,6 +126,7 @@ def _compute_line_bounds(
             start[run_begin + offset] = previous_time + span * fraction
 
     bounds: list[tuple[float, float]] = []
+    max_line_span = 12.0
     for i, line in enumerate(lines):
         end = start[i + 1] if i + 1 < count else (duration if duration else start[i] + 2.0)
         if raw_end[i] is not None:
@@ -130,17 +134,48 @@ def _compute_line_bounds(
         minimum = start[i] + max(0.8, len(line.words) * 0.3)
         if end < minimum:
             end = minimum
+        if end - start[i] > max_line_span and len(line.words) > 0:
+            end = start[i] + max_line_span
         bounds.append((start[i], end))
     return bounds
+
+
+def _reuse_templates(lines: list[LyricLine], line_known: list[list[tuple[int, tuple[float, float]]]]) -> None:
+    """Repeated lines (e.g. the same chorus sung several times) that could not be
+    matched get the relative word-timing template of their first aligned occurrence."""
+    template_by_key: dict[str, int] = {}
+    for line_index, line in enumerate(lines):
+        key = "|".join(normalize_word(word.text) for word in line.words)
+        if not key:
+            continue
+        if key in template_by_key:
+            if line_known[line_index]:
+                continue
+            source_index = template_by_key[key]
+            source = lines[source_index]
+            source_span = (source.end or source.start or 0.0) - (source.start or 0.0)
+            line_span = (line.end or line.start or 0.0) - (line.start or 0.0)
+            if (
+                source_span > 0
+                and line_span > 0
+                and len(source.words) == len(line.words)
+                and any(not word.estimated for word in source.words)
+            ):
+                for word, source_word in zip(line.words, source.words):
+                    relative_start = ((source_word.start or 0.0) - (source.start or 0.0)) / source_span
+                    relative_end = ((source_word.end or 0.0) - (source.start or 0.0)) / source_span
+                    word.start = (line.start or 0.0) + relative_start * line_span
+                    word.end = (line.start or 0.0) + relative_end * line_span
+                    word.estimated = False
+        else:
+            template_by_key[key] = line_index
 
 
 def apply_transcript_timings(
     lines: list[LyricLine], transcript_words: list[dict[str, object]], duration: float | None
 ) -> list[LyricLine]:
     # WhisperX transcribes the sung language (e.g. Korean); the displayed lyrics are
-    # romanized, so transliterate the transcript to romaja before matching. This lets
-    # difflib align real word timings against the romanized lyrics instead of marking
-    # every word as estimated.
+    # romanized, so transliterate the transcript to romaja before matching.
     romanized_transcript: list[dict[str, object]] = []
     for word in transcript_words:
         cloned = copy.copy(word)
@@ -200,6 +235,8 @@ def apply_transcript_timings(
             word.estimated = word_index not in anchor_indices
         line.start = bounds[0]
         line.end = bounds[1]
+
+    _reuse_templates(lines, line_known)
 
     return lines
 
@@ -277,10 +314,12 @@ def transcribe_words(
     gc.collect()
 
     words: list[dict[str, object]] = []
-    for segment in aligned.get("segments", []):
+    for segment_index, segment in enumerate(aligned.get("segments", [])):
         for word in segment.get("words", []):
             if word.get("word") and word.get("start") is not None and word.get("end") is not None:
-                words.append(word)
+                cloned = dict(word)
+                cloned["segment"] = segment_index
+                words.append(cloned)
     if not words:
         raise RuntimeError("WhisperX did not return any word-level timestamps.")
     return words, detected_language
