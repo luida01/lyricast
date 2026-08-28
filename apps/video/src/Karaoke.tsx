@@ -9,6 +9,7 @@ import {
 } from "remotion";
 import { useMemo } from "react";
 import { deriveKaraokeColors, rgbToHex } from "./colors";
+import { findActiveLine, getScrollIndex, normalizeLineTimings } from "./timing";
 
 export interface Word {
   text: string;
@@ -24,6 +25,7 @@ export interface Line {
   words: Word[];
   start: number | null;
   end: number | null;
+  timingQuality?: string | null;
 }
 
 export interface Sync {
@@ -68,13 +70,7 @@ const DEFAULT_STYLE: Style = {
 };
 
 const SLOT_HEIGHT = 170;
-const WINDOW_BEFORE = 1;
-const WINDOW_AFTER = 3;
 const TRANSITION = 0.45;
-
-function easeInOut(x: number): number {
-  return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
-}
 
 function WordView({
   word,
@@ -95,11 +91,18 @@ function WordView({
   active: boolean;
   textShadow: boolean;
 }) {
-  const start = word.start ?? 0;
-  const end = word.end ?? start + 0.4;
-  const startFrame = start * fps;
-  const endFrame = end * fps;
-  const isActive = active && frame >= startFrame && frame < endFrame;
+const start = word.start;
+  const end = word.end;
+  const valid =
+    typeof start === "number" &&
+    typeof end === "number" &&
+    Number.isFinite(start) &&
+    Number.isFinite(end) &&
+    start >= 0 &&
+    end > start;
+  const startFrame = (start ?? 0) * fps;
+  const endFrame = (end ?? start ?? 0) * fps;
+  const isActive = active && valid && frame >= startFrame && frame < endFrame;
   const enter = frame - startFrame;
   const pop = spring({
     frame: Math.max(0, enter),
@@ -230,65 +233,50 @@ export const Karaoke: React.FC<KaraokeProps> = ({ audioSrc, coverSrc, sync, styl
   const t = frame / fps;
   const duration = sync.duration || durationInFrames / fps;
 
-  const lineTimings = useMemo(
-    () =>
-      sync.lines.map((line, index) => {
-        const start = line.start ?? (sync.lines[index - 1]?.end ?? 0);
-        const end = line.end ?? (sync.lines[index + 1]?.start ?? start + 2);
-        return { ...line, start, end };
-      }),
-    [sync.lines],
-  );
+// Single coordinate system: every line is rendered and the scroll uses its
+  // global index, so the active line is always centered and no line can drift
+  // out of view as the index grows.
+  const lineTimings = useMemo(() => normalizeLineTimings(sync.lines), [sync.lines]);
 
-  const activeNow = lineTimings.findIndex((line) => t >= line.start && t < line.end);
+  const activeNow = findActiveLine(lineTimings, t);
 
-  // Effective per-word timings: keep real WhisperX timings, but fill any word still
-  // marked estimated with a proportional slot across its line so the karaoke still
-  // highlights word-by-word instead of all at once.
+  // Trust the timings produced by the pipeline (monotonic, in-bounds). Only
+  // words with missing or invalid timings get a proportional slot so they can
+  // never highlight at frame 0 or outside their line.
   const effectiveLines = useMemo(
     () =>
       lineTimings.map((line) => {
         const start = line.start ?? 0;
         const end = line.end ?? start + Math.max(1.0, line.words.length * 0.4);
-        const span = Math.max(0.3, end - start);
-        const n = Math.max(1, line.words.length);
         const words = line.words.map((word, index) => {
-          if (word.start != null && !word.estimated) {
+          const wordStart = word.start;
+          const wordEnd = word.end;
+          const valid =
+            typeof wordStart === "number" &&
+            typeof wordEnd === "number" &&
+            Number.isFinite(wordStart) &&
+            Number.isFinite(wordEnd) &&
+            wordEnd > wordStart;
+          if (valid) {
             return word;
           }
-          const wordStart = start + (index / n) * span;
-          const wordEnd = start + ((index + 1) / n) * span;
-          return { ...word, start: wordStart, end: Math.max(wordEnd, wordStart + 0.08) };
+          const span = Math.max(0.3, end - start);
+          const n = Math.max(1, line.words.length);
+          const fallbackStart = start + (index / n) * span;
+          const fallbackEnd = Math.max(start + ((index + 1) / n) * span, fallbackStart + 0.08);
+          return { ...word, start: fallbackStart, end: Math.min(end, fallbackEnd) };
         });
-        return { ...line, words };
+        return { ...line, start, end, words };
       }),
     [lineTimings],
   );
 
-  // Pure-function scroll position (no per-frame state): glides smoothly between
-  // lines and, crucially, keeps moving across instrumental gaps instead of freezing.
-  const idxFloat = useMemo(() => {
-    if (activeNow >= 0) {
-      const line = lineTimings[activeNow];
-      const from = activeNow > 0 ? activeNow - 1 : activeNow;
-      const frac = Math.min(1, Math.max(0, (t - line.start) / TRANSITION));
-      return from + (activeNow - from) * easeInOut(frac);
-    }
-    const upcoming = lineTimings.findIndex((line) => t < line.start);
-    if (upcoming < 0) {
-      return Math.max(0, lineTimings.length - 1);
-    }
-    const prev = Math.max(0, upcoming - 1);
-    const gapStart = lineTimings[prev].end;
-    const gapEnd = lineTimings[upcoming].start;
-    const frac = gapEnd > gapStart ? Math.min(1, Math.max(0, (t - gapStart) / (gapEnd - gapStart))) : 1;
-    return prev + (upcoming - prev) * frac;
-  }, [activeNow, lineTimings, t]);
+// Pure-function scroll position (no per-frame state): advances exactly one line
+  // per transition and, during instrumental gaps, reaches the next line quickly
+  // and holds there instead of crawling across the whole gap.
+  const idxFloat = useMemo(() => getScrollIndex(lineTimings, t, TRANSITION), [lineTimings, t]);
 
   const translateY = height / 2 - idxFloat * SLOT_HEIGHT - SLOT_HEIGHT / 2;
-
-  const windowStart = Math.max(0, Math.floor(idxFloat) - WINDOW_BEFORE);
-  const windowEnd = Math.min(lineTimings.length, windowStart + WINDOW_BEFORE + WINDOW_AFTER + 1);
 
   const progress = Math.min(1, Math.max(0, t / duration));
 
@@ -310,15 +298,14 @@ return (
               alignItems: "center",
             }}
           >
-            {effectiveLines.slice(windowStart, windowEnd).map((line, i) => {
-              const actualIndex = windowStart + i;
-              const isActive = actualIndex === activeNow && activeNow >= 0;
-              const dist = Math.abs(actualIndex - idxFloat);
+{effectiveLines.map((line, i) => {
+              const isActive = i === activeNow && activeNow >= 0;
+              const dist = Math.abs(i - idxFloat);
               const size = isActive ? 92 : Math.max(46, 74 - dist * 10);
               const opacity = isActive ? 1 : Math.max(0.3, 0.62 - dist * 0.14);
               return (
                 <div
-                  key={actualIndex}
+                  key={i}
                   style={{
                     height: SLOT_HEIGHT,
                     display: "flex",

@@ -7,7 +7,8 @@
     "dev": "remotion studio src/index.tsx",
     "prepare-song": "tsx scripts/prepare.ts",
     "render": "remotion render Karaoke out.mp4",
-    "render:preview": "remotion render Karaoke out_preview.mp4 --frames=0,900",
+    "render:preview": "remotion render Karaoke out_preview --frames=0-900",
+    "test:timing": "tsx scripts/timing.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

@@ -56,18 +56,18 @@ class LyricsParsingTests(unittest.TestCase):
         self.assertFalse(is_mostly_non_latin("Nal seuchineun geudaeui yeoteun geu mogsoli"))
         self.assertFalse(is_mostly_non_latin("너는 나의 지구 네게 난 just a moon and all I see is you"))
 
-    def test_applies_word_timestamps_without_estimation(self) -> None:
+    def test_word_timings_distributed_within_line(self) -> None:
         lines = [LyricLine("Hello world", [LyricWord("Hello"), LyricWord("world")])]
         transcript = [
-            {"word": "Hello", "start": 1.0, "end": 1.4},
-            {"word": "world", "start": 1.5, "end": 1.9},
+            {"word": "Hello", "start": 1.0, "end": 1.6},
+            {"word": "world", "start": 1.6, "end": 2.2},
         ]
 
-        apply_transcript_timings(lines, transcript, duration=3.0)
+        timed = apply_transcript_timings(lines, transcript, duration=3.0)
 
-        self.assertEqual(lines[0].words[0].start, 1.0)
-        self.assertEqual(lines[0].words[1].start, 1.5)
-        self.assertFalse(lines[0].words[0].estimated)
+        self.assertEqual(timed[0].words[0].start, 1.0)
+        self.assertEqual(timed[0].words[1].end, 2.2)
+        self.assertTrue(all(word.estimated for word in timed[0].words))
 
 
 if __name__ == "__main__":

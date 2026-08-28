@@ -25,6 +25,7 @@ class LyricLine:
     words: list[LyricWord]
     start: Optional[float] = None
     end: Optional[float] = None
+    timing_quality: Optional[str] = None
 
 
 @dataclass
